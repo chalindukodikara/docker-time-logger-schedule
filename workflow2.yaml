@@ -1,0 +1,96 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: build-docker-image-
+  namespace: argo-build
+spec:
+  serviceAccountName: argo-workflow
+  entrypoint: build-workflow
+  volumeClaimTemplates:
+    - metadata:
+        creationTimestamp: null
+        name: workspace
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - kind-worker2
+
+  templates:
+    - name: build-workflow
+      steps:
+        - - name: clone-repo
+            template: clone-repository
+        - - name: build-image
+            template: build-step
+
+    - name: clone-repository
+      container:
+        image: alpine/git
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            echo "Cloning repository from the main branch..."
+            git clone --single-branch --branch dev https://github.com/chalindukodikara/choreo-samples.git /mnt/vol/choreo-samples
+            echo "Repository cloned successfully."
+            echo "Can go into docker-time-logger-schedule"
+        volumeMounts:
+          - name: workspace
+            mountPath: /mnt/vol
+
+    - name: build-step
+      container:
+        image: alpine:3.20
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            echo "Installing dependencies..."
+            apk --no-cache add curl
+
+            # Install containerd client (ctr) in the container
+            apk --no-cache add containerd
+
+            echo "Pulling Docker image from the registry using containerd..."
+            ctr --address /run/containerd/containerd.sock images pull --skip-refresh --no-remote registry.choreo-dp:5000/docker-time-logger:buildpack
+
+            echo "Installing Buildpacks CLI..."
+            curl -L https://github.com/buildpacks/pack/releases/download/v0.36.2/pack-v0.36.2-linux-arm64.tgz | tar -xz -C /usr/local/bin
+
+            echo "Building image using Buildpacks..."
+            /usr/local/bin/pack build docker-time-logger:buildpack \
+              --builder=gcr.io/buildpacks/builder:v1 --docker-host=inherit \
+              --path=/mnt/vol/choreo-samples/docker-time-logger-schedule
+
+            echo "Tagging Docker image for the registry..."
+            ctr --address /run/containerd/containerd.sock images tag docker-time-logger:buildpack registry.choreo-dp:5000/docker-time-logger:buildpack
+
+            echo "Pushing Docker image to the registry..."
+            ctr --address /run/containerd/containerd.sock images push --skip-refresh --no-remote registry.choreo-dp:5000/docker-time-logger:buildpack
+
+            echo "Docker image pushed successfully."
+        volumeMounts:
+          - name: workspace
+            mountPath: /mnt/vol
+          - name: containerd-socket
+            mountPath: /run/containerd/containerd.sock
+            readOnly: true
+
+  volumes:
+    - name: containerd-socket
+      hostPath:
+        path: /run/containerd/containerd.sock
+        type: Socket

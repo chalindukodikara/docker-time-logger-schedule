@@ -1,0 +1,321 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  # generateName: build-image-
+  name: build-image-alpine-11
+  namespace: choreo-ci-default-org
+spec:
+  serviceAccountName: argo-workflow-sa
+  entrypoint: build-workflow
+  volumeClaimTemplates:
+    - metadata:
+        creationTimestamp: null
+        name: workspace
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - choreo-worker2
+  volumes:
+    - name: podman-cache
+      hostPath:
+        path: /shared/podman/cache
+        type: DirectoryOrCreate
+  templates:
+    - name: build-workflow
+      steps:
+        - - name: clone-step
+            template: clone-step
+        - - name: build-step
+            template: build-step
+            arguments:
+              parameters:
+                - name: commit-sha
+                  value: "{{steps.clone-step.outputs.parameters.commit-sha}}"
+        - - name: push-step
+            template: push-step
+            # echo "Cloning repository from the main branch..."
+            # git clone --single-branch --branch dev --depth 1 https://github.com/chalindukodikara/choreo-samples.git /mnt/vol/choreo-samples
+
+            # echo "Repository cloned successfully."
+
+            # cd /mnt/vol/choreo-samples
+            # git config --global advice.detachedHead false
+
+            # echo "Fetching the specific commit..."
+            # git fetch --depth 1 origin 5c56ad8e34821bb76082a28aaa6dfd1ebb260b7a
+            # echo "Fetched the specific commit."
+
+            # echo "Checking out the specific commit..."
+            # git checkout 5c56ad8e34821bb76082a28aaa6dfd1ebb260b7a
+            # echo "Checked out commit successfully."
+
+            # commit
+            # git config --global advice.detachedHead false
+            # git fetch --depth 1 origin 5c56ad8e34821bb76082a28aaa6dfd1ebb260b7a
+            # git checkout 5c56ad8e34821bb76082a28aaa6dfd1ebb260b7a
+    - name: clone-step
+      metadata:
+        labels:
+          step: "clone-step"
+          workflow-name: "build-image-01"
+      container:
+        image: alpine/git
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            echo "Cloning repository from the main branch..."
+            git clone --single-branch --branch dev --depth 1 https://github.com/chalindukodikara/choreo-samples.git /mnt/vol/choreo-samples
+
+            echo "Repository cloned successfully."
+
+            cd /mnt/vol/choreo-samples
+
+            echo "Getting the latest commit SHA..."
+            COMMIT_SHA=$(git rev-parse HEAD)
+            echo -n "$COMMIT_SHA" > /tmp/output-param.txt
+        volumeMounts:
+          - name: workspace
+            mountPath: /mnt/vol
+      outputs:
+        parameters:
+          - name: commit-sha
+            valueFrom:
+              path: /tmp/output-param.txt
+
+    - name: build-step
+      inputs:
+        parameters:
+          - name: commit-sha
+      metadata:
+        labels:
+          step: "build-step"
+          workflow-name: "build-image-01"
+      container:
+        image: chalindukodikara/podman-runner:1.0
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+            echo {{inputs.parameters.commit-sha}}
+
+            echo "Configuring Podman storage..."
+            mkdir -p /etc/containers
+            cat <<EOF > /etc/containers/storage.conf
+            [storage]
+            driver = "overlay"
+            runroot = "/run/containers/storage"
+            graphroot = "/var/lib/containers/storage"
+            [storage.options.overlay]
+            mount_program = "/usr/bin/fuse-overlayfs"
+            EOF
+
+            echo "Setting up Podman socket for Buildpacks..."
+            podman system service --time=0 &
+
+            until podman info --format '{{.Host.RemoteSocket.Exists}}' 2>/dev/null | grep -q "true"; do
+              echo "Podman remote socket not available yet. Retrying in 1 seconds..."
+              sleep 1
+            done
+
+            if [[ ! -f "/shared/podman/cache/builder.tar" ]]; then
+              echo "No cached builder image found. Pulling from registry..."
+              podman pull gcr.io/buildpacks/builder:google-22
+              echo "Saving builder image to cache..."
+              mkdir -p /shared/podman/cache
+              podman save -o /shared/podman/cache/builder.tar gcr.io/buildpacks/builder:google-22
+            else
+              echo "Cached builder image found. Loading..."
+              if podman load -i /shared/podman/cache/builder.tar; then
+                echo "Builder image loaded successfully."
+              else
+                echo "Error loading cached image. Falling back to pulling."
+                podman pull gcr.io/buildpacks/builder:google-22
+                podman save -o /shared/podman/cache/builder.tar gcr.io/buildpacks/builder:google-22
+              fi
+            fi
+
+            if [[ ! -f "/shared/podman/cache/run.tar" ]]; then
+              echo "No cached run image found. Pulling from registry..."
+              podman pull gcr.io/buildpacks/google-22/run:latest
+              echo "Saving run image to cache..."
+              mkdir -p /shared/podman/cache
+              podman save -o /shared/podman/cache/run.tar gcr.io/buildpacks/google-22/run:latest
+            else
+              echo "Cached run image found. Loading..."
+              if podman load -i /shared/podman/cache/run.tar; then
+                echo "run image loaded successfully."
+              else
+                echo "Error loading cached run image. Falling back to pulling."
+                podman pull gcr.io/buildpacks/google-22/run:latest
+                podman save -o /shared/podman/cache/run.tar gcr.io/buildpacks/google-22/run:latest
+              fi
+            fi
+
+
+
+            echo "Building image using Buildpacks..."
+            /usr/local/bin/pack build docker-time-logger:v1.10 --builder=gcr.io/buildpacks/builder:google-22 \
+            --docker-host=inherit --path=/mnt/vol/choreo-samples/docker-time-logger-schedule --pull-policy if-not-present
+
+            echo "Saving Docker image..."
+            podman save -o /mnt/vol/app-image.tar docker-time-logger:v1.10
+            podman volume prune --force
+        volumeMounts:
+          - name: workspace
+            mountPath: /mnt/vol
+          - name: podman-cache
+            mountPath: /shared/podman/cache
+    - name: push-step
+      metadata:
+        labels:
+          step: "push-step"
+          workflow-name: "build-image-01"
+      container:
+        image: chalindukodikara/podman-runner:1.0
+        securityContext:
+          privileged: true
+        command: ["sh", "-c"]
+        args:
+          - |
+            set -e
+
+            echo "Configuring Podman storage..."
+            mkdir -p /etc/containers
+            cat <<EOF > /etc/containers/storage.conf
+            [storage]
+            driver = "overlay"
+            runroot = "/run/containers/storage"
+            graphroot = "/run/containers/graphroot"
+            imagestore = "/shared/podman/cache"
+            [storage.options.overlay]
+            mount_program = "/usr/bin/fuse-overlayfs"
+            EOF
+
+            podman load -i /mnt/vol/app-image.tar
+            echo "Tagging Docker image for the registry..."
+            podman tag docker-time-logger:v1.10 registry.choreo-system:5000/docker-time-logger:v1.10
+            echo "Pushing Docker image to the registry..."
+            podman push --tls-verify=false registry.choreo-system:5000/docker-time-logger:v1.10
+            echo "Docker image pushed successfully."
+
+            podman rmi docker-time-logger:v1.10 -f
+            podman volume prune --force
+        volumeMounts:
+          - name: workspace
+            mountPath: /mnt/vol
+          - name: podman-cache
+            mountPath: /shared/podman/cache
+            # podman build -t docker-time-logger:v1.10 -f /mnt/vol/choreo-samples/docker-time-logger-schedule/test/Dockerfile /mnt/vol/choreo-samples/docker-time-logger-schedule
+
+            # /usr/local/bin/pack build docker-time-logger:v1.10 --builder=gcr.io/buildpacks/builder:google-22 \
+            # --docker-host=inherit --path=/mnt/vol/source/docker-time-logger-schedule --pull-policy if-not-present
+
+          # podman build -t docker-time-logger:v1.1 /mnt/vol/choreo-samples/docker-time-logger-schedule
+          # graphroot = "/shared/podman/cache"
+          # runroot = "/run/containers/storage"
+          # /usr/local/bin/pack build docker-time-logger:v1.1 \
+          #   --builder=gcr.io/buildpacks/builder:google-22 --docker-host=inherit \
+          #   --path=/mnt/vol/choreo-samples/docker-time-logger-schedule --platform linux/arm64
+
+          #         echo "Checking if buildpack builder image exists..."
+          # if podman image exists gcr.io/buildpacks/builder:google-22; then
+          #   echo "Builder image already exists, skipping pull..."
+          # else
+          #   echo "Pulling builder image..."
+          #   podman pull gcr.io/buildpacks/builder:google-22
+          # fi
+    # - name: clone-repository
+    # container:
+    #   image: alpine/git
+    #   command: ["sh", "-c"]
+    #   args:
+    #     - |
+    #       set -e
+    #       echo "Cloning repository from the main branch..."
+    #       git clone --single-branch --branch dev https://github.com/chalindukodikara/choreo-samples.git /mnt/vol/choreo-samples
+    #       echo "Repository cloned successfully."
+    #       ls /mnt/vol/choreo-samples/docker-time-logger-schedule
+    #       echo "Can go into docker-time-logger-schedule"
+    #   volumeMounts:
+    #     - name: workspace
+    #       mountPath: /mnt/vol
+
+    # - name: build-step
+    #   container:
+    #     image: alpine:3.20
+    #     securityContext:
+    #       privileged: true
+    #     command: ["sh", "-c"]
+    #     args:
+    #       - |
+    #         set -e
+    #         echo "Installing dependencies and Podman..."
+    #         apk --no-cache add podman buildah shadow fuse-overlayfs
+
+    #         echo "Configuring Podman storage..."
+    #         mkdir -p /etc/containers
+    #         echo -e "[storage]\ndriver = \"overlay\"\nrunroot = \"/var/run/containers/storage\"\ngraphroot = \"/var/lib/containers/storage\"\n[storage.options.overlay]\nmount_program = \"/usr/bin/fuse-overlayfs\"" > /etc/containers/storage.conf
+
+    #         echo "Building Docker image..."
+    #         podman build -t docker-time-logger:latest /mnt/vol/choreo-samples/docker-time-logger-schedule
+
+    #         echo "Tagging Docker image for the registry..."
+    #         podman tag docker-time-logger:latest registry.choreo-dp:5000/docker-time-logger:latest
+
+    #         echo "Pushing Docker image to the registry..."
+    #         podman push --tls-verify=false registry.choreo-dp:5000/docker-time-logger:latest
+
+    #         echo "Docker image pushed successfully."
+    #     volumeMounts:
+    #       - name: workspace
+    #         mountPath: /mnt/vol
+    # - name: build-step
+    #   container:
+    #     image: alpine:3.20
+    #     securityContext:
+    #       privileged: true
+    #     command: ["sh", "-c"]
+    #     args:
+    #       - |
+    #         set -e
+    #         echo "Installing dependencies, Buildpacks CLI, and Podman..."
+    #         apk --no-cache add curl podman buildah shadow fuse-overlayfs
+
+    #         echo "Installing Buildpacks CLI..."
+    #         curl -L -o /usr/local/bin/pack https://github.com/buildpacks/pack/releases/download/v0.29.0/pack-v0.29.0-linux.tgz
+    #         tar -xzf /usr/local/bin/pack -C /usr/local/bin
+    #         chmod +x /usr/local/bin/pack
+
+    #         echo "Configuring Podman storage..."
+    #         mkdir -p /etc/containers
+    #         echo -e "[storage]\ndriver = \"overlay\"\nrunroot = \"/var/run/containers/storage\"\ngraphroot = \"/var/lib/containers/storage\"\n[storage.options.overlay]\nmount_program = \"/usr/bin/fuse-overlayfs\"" > /etc/containers/storage.conf
+
+    #         echo "Building the image using Buildpacks..."
+    #         pack build docker-time-logger:latest \
+    #           --builder=gcr.io/buildpacks/builder:v1 \
+    #           --path=/mnt/vol/choreo-samples/docker-time-logger-schedule
+
+    #         echo "Tagging Docker image for the registry..."
+    #         podman tag docker-time-logger:latest registry.choreo-dp:5000/docker-time-logger:latest
+
+    #         echo "Pushing Docker image to the registry..."
+    #         podman push --tls-verify=false registry.choreo-dp:5000/docker-time-logger:latest
+
+    #         echo "Docker image pushed successfully."
+    #     volumeMounts:
+    #       - name: workspace
+    #         mountPath: /mnt/vol
