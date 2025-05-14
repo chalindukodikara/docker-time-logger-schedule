@@ -1,0 +1,7 @@
+{
+   "auths": {
+       "registry.choreo-system:5000": {
+           "auth": ""
+       }
+   }
+}

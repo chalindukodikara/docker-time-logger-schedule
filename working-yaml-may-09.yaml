@@ -1,0 +1,373 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    workflows.argoproj.io/pod-name-format: v2
+  labels:
+    managed-by: choreo-build-controller
+    workflows.argoproj.io/completed: "true"
+    workflows.argoproj.io/phase: Succeeded
+  name: reading-list-service-build-01-a008bd4a
+  namespace: choreo-ci-default-org
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: core.choreo.dev/noderole
+            operator: In
+            values:
+            - workflow-runner
+  arguments: {}
+  entrypoint: build-workflow
+  serviceAccountName: workflow-sa
+  templates:
+  - inputs: {}
+    metadata: {}
+    name: build-workflow
+    outputs: {}
+    steps:
+    - - arguments: {}
+        name: clone-step
+        template: clone-step
+    - - arguments:
+          parameters:
+          - name: git-revision
+            value: '{{steps.clone-step.outputs.parameters.git-revision}}'
+        name: build-step
+        template: build-step
+    - - arguments:
+          parameters:
+          - name: git-revision
+            value: '{{steps.clone-step.outputs.parameters.git-revision}}'
+        name: push-step
+        template: push-step
+  - container:
+      args:
+      - |-
+        set -e
+        git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /mnt/vol/source
+        cd /mnt/vol/source
+        COMMIT_SHA=$(git rev-parse HEAD)
+        echo -n "$COMMIT_SHA" | cut -c1-8 > /tmp/git-revision.txt
+      command:
+      - sh
+      - -c
+      image: alpine/git
+      name: ""
+      resources: {}
+      volumeMounts:
+      - mountPath: /mnt/vol
+        name: workspace
+    inputs: {}
+    metadata:
+      labels:
+        step: clone-step
+        workflow: reading-list-service-build-01
+    name: clone-step
+    outputs:
+      parameters:
+      - name: git-revision
+        valueFrom:
+          path: /tmp/git-revision.txt
+  - container:
+      args:
+      - |-
+        set -e
+
+        mkdir -p /etc/containers
+        cat <<EOF > /etc/containers/storage.conf
+        [storage]
+        driver = "overlay"
+        runroot = "/run/containers/storage"
+        graphroot = "/var/lib/containers/storage"
+        [storage.options.overlay]
+        mount_program = "/usr/bin/fuse-overlayfs"
+        EOF
+        podman system service --time=0 &
+        until podman info --format '{{.Host.RemoteSocket.Exists}}' 2>/dev/null | grep -q "true"; do
+          sleep 1
+        done
+
+
+
+        if [[ ! -f "/shared/podman/cache/google-builder.tar" ]]; then
+          podman pull gcr.io/buildpacks/builder:google-22
+          podman save -o /shared/podman/cache/google-builder.tar gcr.io/buildpacks/builder:google-22
+        else
+          if ! podman load -i /shared/podman/cache/google-builder.tar; then
+            podman pull gcr.io/buildpacks/builder:google-22
+            podman save -o /shared/podman/cache/google-builder.tar gcr.io/buildpacks/builder:google-22
+          fi
+        fi
+
+
+        if [[ ! -f "/shared/podman/cache/google-run.tar" ]]; then
+          podman pull gcr.io/buildpacks/google-22/run:latest
+          podman save -o /shared/podman/cache/google-run.tar gcr.io/buildpacks/google-22/run:latest
+        else
+          if ! podman load -i /shared/podman/cache/google-run.tar; then
+            podman pull gcr.io/buildpacks/google-22/run:latest
+            podman save -o /shared/podman/cache/google-run.tar gcr.io/buildpacks/google-22/run:latest
+          fi
+        fi
+
+        /usr/local/bin/pack build default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-{{inputs.parameters.git-revision}} --builder=gcr.io/buildpacks/builder:google-22 \
+        --docker-host=inherit --path=/mnt/vol/source/go-reading-list-rest-api --pull-policy if-not-present --env GOOGLE_GO_VERSION="1.x"
+
+        podman save -o /mnt/vol/app-image.tar default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-{{inputs.parameters.git-revision}}
+      command:
+      - sh
+      - -c
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      name: ""
+      resources: {}
+      securityContext:
+        privileged: true
+      volumeMounts:
+      - mountPath: /mnt/vol
+        name: workspace
+      - mountPath: /shared/podman/cache
+        name: podman-cache
+    inputs:
+      parameters:
+      - name: git-revision
+    metadata:
+      labels:
+        step: build-step
+        workflow: reading-list-service-build-01
+    name: build-step
+    outputs: {}
+  - container:
+      args:
+      - |-
+        set -e
+        GIT_REVISION={{inputs.parameters.git-revision}}
+        mkdir -p /etc/containers
+        cat <<EOF > /etc/containers/storage.conf
+        [storage]
+        driver = "overlay"
+        runroot = "/run/containers/storage"
+        graphroot = "/var/lib/containers/storage"
+        [storage.options.overlay]
+        mount_program = "/usr/bin/fuse-overlayfs"
+        EOF
+
+        podman load -i /mnt/vol/app-image.tar
+        podman tag default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$GIT_REVISION registry.choreo-system:5000/default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$GIT_REVISION
+        podman push --tls-verify=false registry.choreo-system:5000/default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$GIT_REVISION
+
+        podman rmi default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$GIT_REVISION -f
+        echo -n "default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$GIT_REVISION" > /tmp/image.txt
+      command:
+      - sh
+      - -c
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      name: ""
+      resources: {}
+      securityContext:
+        privileged: true
+      volumeMounts:
+      - mountPath: /mnt/vol
+        name: workspace
+    inputs:
+      parameters:
+      - name: git-revision
+    metadata:
+      labels:
+        step: push-step
+        workflow: reading-list-service-build-01
+    name: push-step
+    outputs:
+      parameters:
+      - name: image
+        valueFrom:
+          path: /tmp/image.txt
+  ttlStrategy:
+    secondsAfterFailure: 3600
+    secondsAfterSuccess: 3600
+  volumeClaimTemplates:
+  - metadata:
+      creationTimestamp: null
+      name: workspace
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 2Gi
+    status: {}
+  volumes:
+  - hostPath:
+      path: /shared/podman/cache
+      type: DirectoryOrCreate
+    name: podman-cache
+status:
+  artifactGCStatus:
+    notSpecified: true
+  artifactRepositoryRef:
+    artifactRepository: {}
+    default: true
+  conditions:
+  - status: "False"
+    type: PodRunning
+  - status: "True"
+    type: Completed
+  finishedAt: "2025-05-09T12:05:43Z"
+  nodes:
+    reading-list-service-build-01-a008bd4a:
+      children:
+      - reading-list-service-build-01-a008bd4a-3595208640
+      displayName: reading-list-service-build-01-a008bd4a
+      finishedAt: "2025-05-09T12:05:43Z"
+      id: reading-list-service-build-01-a008bd4a
+      name: reading-list-service-build-01-a008bd4a
+      outboundNodes:
+      - reading-list-service-build-01-a008bd4a-744234809
+      phase: Succeeded
+      progress: 3/3
+      resourcesDuration:
+        cpu: 55
+        memory: 573
+      startedAt: "2025-05-09T11:59:38Z"
+      templateName: build-workflow
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: Steps
+    reading-list-service-build-01-a008bd4a-440722078:
+      boundaryID: reading-list-service-build-01-a008bd4a
+      children:
+      - reading-list-service-build-01-a008bd4a-744234809
+      displayName: '[2]'
+      finishedAt: "2025-05-09T12:05:43Z"
+      id: reading-list-service-build-01-a008bd4a-440722078
+      name: reading-list-service-build-01-a008bd4a[2]
+      nodeFlag: {}
+      phase: Succeeded
+      progress: 1/1
+      resourcesDuration:
+        cpu: 2
+        memory: 27
+      startedAt: "2025-05-09T12:05:23Z"
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: StepGroup
+    reading-list-service-build-01-a008bd4a-744234809:
+      boundaryID: reading-list-service-build-01-a008bd4a
+      displayName: push-step
+      finishedAt: "2025-05-09T12:05:40Z"
+      hostNodeName: choreo-dp-worker
+      id: reading-list-service-build-01-a008bd4a-744234809
+      inputs:
+        parameters:
+        - name: git-revision
+          value: 6153744b
+      name: reading-list-service-build-01-a008bd4a[2].push-step
+      outputs:
+        exitCode: "0"
+        parameters:
+        - name: image
+          value: default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-6153744b
+          valueFrom:
+            path: /tmp/image.txt
+      phase: Succeeded
+      progress: 1/1
+      resourcesDuration:
+        cpu: 2
+        memory: 27
+      startedAt: "2025-05-09T12:05:23Z"
+      templateName: push-step
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: Pod
+    reading-list-service-build-01-a008bd4a-892810340:
+      boundaryID: reading-list-service-build-01-a008bd4a
+      children:
+      - reading-list-service-build-01-a008bd4a-440722078
+      displayName: build-step
+      finishedAt: "2025-05-09T12:05:13Z"
+      hostNodeName: choreo-dp-worker
+      id: reading-list-service-build-01-a008bd4a-892810340
+      inputs:
+        parameters:
+        - name: git-revision
+          value: 6153744b
+      name: reading-list-service-build-01-a008bd4a[1].build-step
+      outputs:
+        exitCode: "0"
+      phase: Succeeded
+      progress: 1/1
+      resourcesDuration:
+        cpu: 48
+        memory: 486
+      startedAt: "2025-05-09T12:00:55Z"
+      templateName: build-step
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: Pod
+    reading-list-service-build-01-a008bd4a-3475937652:
+      boundaryID: reading-list-service-build-01-a008bd4a
+      children:
+      - reading-list-service-build-01-a008bd4a-3662172021
+      displayName: clone-step
+      finishedAt: "2025-05-09T12:00:45Z"
+      hostNodeName: choreo-dp-worker
+      id: reading-list-service-build-01-a008bd4a-3475937652
+      name: reading-list-service-build-01-a008bd4a[0].clone-step
+      outputs:
+        exitCode: "0"
+        parameters:
+        - name: git-revision
+          value: 6153744b
+          valueFrom:
+            path: /tmp/git-revision.txt
+      phase: Succeeded
+      progress: 1/1
+      resourcesDuration:
+        cpu: 5
+        memory: 60
+      startedAt: "2025-05-09T11:59:38Z"
+      templateName: clone-step
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: Pod
+    reading-list-service-build-01-a008bd4a-3595208640:
+      boundaryID: reading-list-service-build-01-a008bd4a
+      children:
+      - reading-list-service-build-01-a008bd4a-3475937652
+      displayName: '[0]'
+      finishedAt: "2025-05-09T12:00:55Z"
+      id: reading-list-service-build-01-a008bd4a-3595208640
+      name: reading-list-service-build-01-a008bd4a[0]
+      nodeFlag: {}
+      phase: Succeeded
+      progress: 3/3
+      resourcesDuration:
+        cpu: 55
+        memory: 573
+      startedAt: "2025-05-09T11:59:38Z"
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: StepGroup
+    reading-list-service-build-01-a008bd4a-3662172021:
+      boundaryID: reading-list-service-build-01-a008bd4a
+      children:
+      - reading-list-service-build-01-a008bd4a-892810340
+      displayName: '[1]'
+      finishedAt: "2025-05-09T12:05:23Z"
+      id: reading-list-service-build-01-a008bd4a-3662172021
+      name: reading-list-service-build-01-a008bd4a[1]
+      nodeFlag: {}
+      phase: Succeeded
+      progress: 2/2
+      resourcesDuration:
+        cpu: 50
+        memory: 513
+      startedAt: "2025-05-09T12:00:55Z"
+      templateScope: local/reading-list-service-build-01-a008bd4a
+      type: StepGroup
+  phase: Succeeded
+  progress: 3/3
+  resourcesDuration:
+    cpu: 55
+    memory: 573
+  startedAt: "2025-05-09T11:59:37Z"
+  taskResultsCompletionStatus:
+    reading-list-service-build-01-a008bd4a-744234809: true
+    reading-list-service-build-01-a008bd4a-892810340: true
+    reading-list-service-build-01-a008bd4a-3475937652: true
