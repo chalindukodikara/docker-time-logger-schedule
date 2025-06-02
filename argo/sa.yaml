@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    managed-by: choreo-build-controller
+  name: workflow-sa
+  namespace: argo-build

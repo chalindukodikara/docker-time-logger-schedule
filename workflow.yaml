@@ -2,10 +2,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   # generateName: build-docker-image-
-  name: build-docker-image-01
+  name: build-docker-image-02
   namespace: argo-build
 spec:
-  serviceAccountName: argo-workflow
+  serviceAccountName: argo-build
   entrypoint: build-workflow
   volumeClaimTemplates:
     - metadata:

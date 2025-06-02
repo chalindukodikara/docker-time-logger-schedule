@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    managed-by: choreo-build-controller
+  name: workflow-role
+  namespace: argo-build
+rules:
+- apiGroups:
+  - argoproj.io
+  resources:
+  - workflowtaskresults
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch

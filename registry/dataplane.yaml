@@ -12,20 +12,12 @@ metadata:
   namespace: default-org
 spec:
   registry:
-    noSecrets:
-      - registry.choreo-system:5000
-    imagePushSecrets:
-      - name: docker-push-secret
-        prefix: docker.io/chalindukodikara
-      - name: ghcr-push-secret
-        prefix: ghcr.io/openchoreo
-  registry:
-    noSecrets:
-      - docker.io/kodikara
+    unauthenticated:
+      - docker.io/test
       - registry.choreo-system:5000
     imagePushSecrets:
       - name: dev-dockerhub-push-secret
-        prefix: docker.io/chalindukodikara
+        prefix: docker.io/your-org
       - name: dev-ghcr-push-secret
         prefix: ghcr.io/your-org
   gateway:
