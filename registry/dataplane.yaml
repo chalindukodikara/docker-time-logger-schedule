@@ -12,14 +12,24 @@ metadata:
   namespace: default-org
 spec:
   registry:
-    unauthenticated:
-      - docker.io/test
-      - registry.choreo-system:5000
-    imagePushSecrets:
-      - name: dev-dockerhub-push-secret
-        prefix: docker.io/your-org
-      - name: dev-ghcr-push-secret
-        prefix: ghcr.io/your-org
+    push:
+      unauthenticated:
+        - docker.io/test
+        - registry.choreo-system:5000
+      imagePushSecrets:
+        - name: dev-dockerhub-push-secret
+          prefix: docker.io/your-org
+        - name: dev-ghcr-push-secret
+          prefix: ghcr.io/your-org
+    pull:
+      unauthenticated:
+        - docker.io/test
+        - registry.choreo-system:5000
+      imagePushSecrets:
+        - name: dev-dockerhub-push-secret
+          prefix: docker.io/your-org
+        - name: dev-ghcr-push-secret
+          prefix: ghcr.io/your-org
   gateway:
     organizationVirtualHost: choreoapis.internal
     publicVirtualHost: choreoapis.localhost

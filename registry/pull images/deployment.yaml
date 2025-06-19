@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-02
+  labels:
+    apps: hello-world
+  namespace: dp-test-02
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      apps: hello-world
+  template:
+    metadata:
+      labels:
+        apps: hello-world
+    spec:
+      containers:
+        - name: hello-world
+          image: chalindukodikara/hello-world
+      imagePullSecrets:
+        - name: docker-pull-secret-hello-world
