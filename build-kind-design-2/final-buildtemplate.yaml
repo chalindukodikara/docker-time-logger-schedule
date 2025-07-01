@@ -1,0 +1,168 @@
+apiVersion: core.choreo.dev/v1
+kind: BuildTemplate
+metadata:
+  name: buildpack-services-template
+  namespace: default-org
+  labels:
+    template-type: microservice     # Indicates the kind of component this template is for
+    language: go | node | etc       # Programming language target
+    version: "v1.0"                 # Template version
+spec:
+  # "single": All steps run in a single pod (via containerSet)
+  # "isolated": Each step runs in its own pod (via separate tasks)
+  executionMode: "single"
+
+  # Optional timeout to avoid hung builds
+  timeout: "30m"
+
+  # Global parameters (can be overridden per-Build)
+  parameters:
+    coverage_threshold: '80'
+    builder_image: 'gcr.io/buildpacks/builder:google-22'
+    run_image: 'gcr.io/buildpacks/google-22/run:latest'
+    docker-host: 'inherit'
+    platform: 'linux/amd64'
+    env:
+      BP_GO_VERSION: '1.22'
+      APP_ENV: 'production'
+    limits:
+      memory: '128Mi'
+      cpu: '200m'
+    context: '/go-reading-list-rest-api'
+    dockerfilePath: '/go-reading-list-rest-api/Dockerfile'
+    language: 'go'
+    version: '1.21'
+    buildArgs:
+      NODE_VERSION: '18'
+      APP_VERSION: 'v1.0.0'
+
+
+  # Shared volumes mounted to all containers
+  volumes:
+    - name: podman-cache
+      hostPath:
+        path: /shared/podman/cache
+        type: DirectoryOrCreate
+    - name: test-results
+      emptyDir: {}
+
+  # PVC used for storing source code and artifacts
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi
+  # STEP GRAPH
+  #   • outer list  = sequential
+  #   • inner list  = parallel fan-out
+  steps:
+    # --- Sequential Step 1: Clone the repo ---
+    - - name: clone-step
+        script: |
+          #!/bin/bash
+          set -e
+          git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /mnt/vol/source
+          cd /mnt/vol/source
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo -n "$COMMIT_SHA" | cut -c1-8 > /tmp/git-revision.txt
+        image: alpine/git
+        retries: 3 # maps to Tekton “retries”, Argo limit
+        volumeMounts:
+          - mountPath: /mnt/vol
+            name: workspace
+        outputs:
+          - name: git-revision
+            valueFrom:
+              path: /tmp/git-revision.txt
+        resource:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+
+    # --- Sequential Step 2: Build using Podman ---
+    - - name: build-step
+        args: |
+          #!/bin/bash
+          echo "Build Script"
+          echo "gcr.io/buildpacks/builder:google-22"
+          echo "gcr.io/buildpacks/google-22/run:latest"
+        image: ghcr.io/openchoreo/podman-runner:v1.0
+        securityContext:
+          privileged: true
+        env:
+          - name: CGO_ENABLED
+            value: "0"
+          - name: GOPROXY
+            value: "https://proxy.golang.org,direct"
+          - name: GOSUMDB
+            value: "sum.golang.org"
+          - name: APP_VERSION
+            value: "v1.0.0"
+          - name: BP_GO_VERSION
+            value: "1.22"   # Passed dynamically via inputs
+        inputs:
+          - name: git-revision
+        volumeMounts:
+          - mountPath: /mnt/vol
+            name: workspace
+          - mountPath: /shared/podman/cache
+            name: podman-cache
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+
+    # --- Parallel Test & Linting Phase ---
+    - - name: Unit Tests
+        script: |
+          #!/bin/bash
+          echo "Node version: 18"
+          echo "Running unit tests..."
+          sleep 3
+          echo "Unit tests completed"
+          echo "unit-test-results" > /tmp/parallel-workspace/unit.txt
+
+      - name: Integration Tests
+        script: |
+          #!/bin/bash
+          echo "Running integration tests..."
+          sleep 4
+          echo "Integration tests completed"
+          echo "integration-test-results" > /tmp/parallel-workspace/integration.txt
+
+      - name: Linting
+        script: |
+          #!/bin/bash
+          echo "Running code linting..."
+          sleep 2
+          echo "Linting completed"
+          echo "linting-results" > /tmp/parallel-workspace/lint.txt
+    - - name: flip-coin
+        image: python:alpine3.6
+        script:
+          command: [python]
+          source: |
+            import random
+            result = "heads" if random.randint(0,1) == 0 else "tails"
+            print(result)
+
+    - - name: heads
+        container:
+          image: alpine:3.6
+          command: [sh, -c]
+          args: ["echo \"it was heads\""]
+
+    - - name: tails
+        container:
+          image: alpine:3.6
+          command: [sh, -c]
+          args: ["echo \"it was tails\""]
