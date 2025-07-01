@@ -1,0 +1,61 @@
+{{- $vals := include "renderVals" . | fromYaml }}
+apiVersion: core.choreo.dev/v1
+kind: BuildTemplate
+metadata:
+  name: {{ .Values.template.name }}
+  labels: { language: go, template-type: microservice }
+spec:
+  executionMode: {{ .Values.template.executionMode | quote }}
+  timeout:       {{ .Values.template.timeout       | quote }}
+
+  parameters:
+{{- range $k, $v := $vals }}
+    - name: {{ $k }}
+      value: {{ $v | quote }}
+{{- end }}
+
+  workspace:
+    volumeClaimTemplate:
+      accessModes: ["ReadWriteOnce"]
+      resources: { requests: { storage: 2Gi } }
+
+  volumes:
+    - { name: podman-cache, type: hostPath, path: /shared/podman/cache }
+
+  steps:
+  - - name: clone
+      image: alpine/git
+      retries: 3
+      script: |
+        set -e
+        git clone --depth 1 {{ $.Values.build.repository.url }} /workspace/src
+        cd /workspace/src
+        git rev-parse --short HEAD > /workspace/git_sha.txt
+      outputs: [{ name: git_sha, path: /workspace/git_sha.txt }]
+
+  - - name: build
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      securityContext: { privileged: true }
+      env:
+        - { name: BP_GO_VERSION, value: {{ $vals.go_version | quote }} }
+        - { name: APP_ENV,       value: {{ ($vals.env).APP_ENV | default "dev" | quote }} }
+      script: |
+        set -e
+        cd /workspace/src/{{ $.Values.build.repository.appPath }}
+        pack build myimg:{{ $vals.app_version }} \
+          --builder {{ $vals.builder_image }} \
+          --run-image {{ $vals.run_image }} \
+          --docker-host {{ $vals.docker_host }} \
+          --path . \
+          --env BP_GO_VERSION={{ $vals.go_version }}
+      inputs: [ git_sha ]
+      volumeMounts:
+        - { name: podman-cache, mountPath: /var/lib/containers/cache }
+
+  # Fix: Proper parallel step syntax
+  - - name: unit-tests
+      image: golang:{{ $vals.go_version }}
+      script: go test ./...
+    - name: lint
+      image: golangci/golangci-lint:v1.55
+      script: golangci-lint run

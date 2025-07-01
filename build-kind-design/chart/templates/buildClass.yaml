@@ -1,0 +1,8 @@
+apiVersion: core.choreo.dev/v1
+kind: BuildClass
+metadata:
+  name: {{ .Values.class.name }}
+spec:
+  engine:      {{ .Values.class.engine }}
+  templateRef: {{ .Values.template.name }}
+  parameters:  {{- toYaml .Values.class.parameters | nindent 4 }}

@@ -1,0 +1,156 @@
+apiVersion: core.choreo.dev/v1
+kind: BuildClass
+metadata:
+  name: default-go
+  namespace: default-org
+  labels:
+    language: go
+    maintainer: platform-team
+spec:
+  # PE-controlled execution engine
+  engine: argo
+  
+  # PE-defined buildpack configuration
+  buildPack:
+    name: go
+    version: 1.22
+    builderImage: gcr.io/buildpacks/builder:google-22
+    runImage: gcr.io/buildpacks/google-22/run:latest
+    
+  # PE-enforced defaults that developers can override
+  defaultParams:
+    env:
+      BP_GO_VERSION: 1.22
+      CGO_ENABLED: "0"
+    buildArgs:
+      GOPROXY: https://proxy.golang.org
+    docker-host: inherit
+    platform: linux/amd64
+    
+  # PE-enforced resource constraints
+  limits:
+    maxCPU: "4"
+    maxMemory: "8Gi"
+    maxBuildTime: "30m"
+    
+  # PE-controlled security policies
+  security:
+    allowPrivileged: false
+    runAsNonRoot: true
+    seccompProfile: runtime/default
+    
+  # PE-defined default template reference
+  defaultTemplateRef:
+    name: go-buildpack-template
+    
+  # PE-controlled override policies
+  overridePolicy:
+    allowTemplateOverride: true
+    allowParamOverride: true
+    restrictedParams:
+      - docker-host
+      - platform
+
+
+apiVersion: core.choreo.dev/v1
+kind: BuildPipeline
+metadata:
+  name: default-go-pipeline
+  namespace: default-org
+  labels:
+    language: go
+    type: default
+    maintainer: platform-team
+spec:
+  # PE-defined default pipeline flow
+  steps:
+    - name: clone
+      templateRef:
+        name: go-buildpack-template
+        template: clone-step
+      when: "{{workflow.parameters.skip-clone}} != 'true'"
+      
+    - name: security-scan
+      templateRef:
+        name: security-scan-template
+        template: source-scan
+      depends: clone
+      when: "{{workflow.parameters.enable-security-scan}} == 'true'"
+      
+    - name: build
+      templateRef:
+        name: go-buildpack-template
+        template: build-step
+      depends: clone
+      
+    - name: test
+      templateRef:
+        name: go-test-template
+        template: unit-test
+      depends: build
+      when: "{{workflow.parameters.skip-tests}} != 'true'"
+      
+    - name: image-scan
+      templateRef:
+        name: security-scan-template
+        template: image-scan
+      depends: build
+      when: "{{workflow.parameters.enable-image-scan}} == 'true'"
+      
+  # PE-controlled pipeline parameters
+  parameters:
+    - name: enable-security-scan
+      value: "true"
+    - name: enable-image-scan
+      value: "true"
+    - name: skip-tests
+      value: "false"
+    - name: skip-clone
+      value: "false"
+
+apiVersion: core.choreo.dev/v1
+kind: Build
+metadata:
+  name: reading-list-service-build
+  namespace: default-org
+  labels:
+    app: reading-list-service
+    team: backend-team
+spec:
+  # Developer selects PE-provided build class
+  classRef:
+    name: default-go
+    
+  # Developer-provided source information
+  repository:
+    url: https://github.com/wso2/choreo-samples
+    revision:
+      commit: 4061be9
+    appPath: /go-reading-list-rest-api
+    
+  # Developer-provided build configuration
+  image:
+    name: reading-list-service
+    tag: main
+    registry: docker.io/myorg
+    
+  # Developer can override allowed parameters
+  params:
+    env:
+      BP_GO_VERSION: 1.21  # Override PE default
+      APP_ENV: production
+    buildArgs:
+      APP_VERSION: v1.0.0
+    # Cannot override restricted params like docker-host, platform
+    
+  # Developer can optionally override pipeline
+  pipelineRef:
+    name: custom-go-pipeline  # Optional: use custom pipeline instead of default
+    
+  # Developer-controlled build triggers
+  triggers:
+    - type: webhook
+      enabled: true
+    - type: schedule
+      schedule: "0 2 * * *"  # Nightly builds
+      enabled: false

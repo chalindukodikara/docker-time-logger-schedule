@@ -1,0 +1,9 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: test-template-usage-001
+  namespace: choreo-ci-default-org
+spec:
+  # Pull everything (entrypoint, volumes, SA, etc.) from the template
+  workflowTemplateRef:
+    name: build-container-set-template

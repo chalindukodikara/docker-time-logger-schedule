@@ -1,0 +1,62 @@
+{{- $vals := include "renderVals" . | fromYaml }}
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: wf-{{ .Values.build.name }}
+  labels: { buildClass: {{ .Values.class.name }} }
+spec:
+  entrypoint: build
+  templates:
+  - name: build
+    containerSet:
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: podman-cache
+          hostPath:
+            path: /shared/podman/cache
+            type: DirectoryOrCreate
+      containers:
+
+        - name: clone
+          image: alpine/git
+          command: [sh, -c]
+          args:
+            - >-
+              git clone --depth 1 {{ .Values.build.repository.url }} /w &&
+              cd /w/{{ .Values.build.repository.appPath }} &&
+              git rev-parse --short HEAD > /w/git_sha.txt
+          volumeMounts: [{ name: workspace, mountPath: /w }]
+
+        - name: build
+          dependencies: ["clone"]
+          image: ghcr.io/openchoreo/podman-runner:v1.0
+          env:
+            - { name: BP_GO_VERSION, value: {{ $vals.go_version | quote }} }
+            - { name: APP_ENV,       value: {{ ($vals.env).APP_ENV | default "dev" | quote }} }
+          command: [sh, -c]
+          args:
+            - >-
+              cd /w/{{ .Values.build.repository.appPath }} &&
+              pack build myimg:{{ $vals.app_version }}
+              --builder {{ $vals.builder_image }}
+              --run-image {{ $vals.run_image }}
+              --docker-host {{ $vals.docker_host }}
+              --path . --env BP_GO_VERSION={{ $vals.go_version }}
+          volumeMounts:
+            - { name: workspace,   mountPath: /w }
+            - { name: podman-cache, mountPath: /var/lib/containers/cache }
+
+        - name: unit-tests
+          dependencies: ["build"]
+          image: golang:{{ $vals.go_version }}
+          command: [sh, -c]
+          args: [ "cd /w/{{ .Values.build.repository.appPath }} && go test ./..." ]
+          volumeMounts: [{ name: workspace, mountPath: /w }]
+
+        - name: lint
+          dependencies: ["build"]
+          image: golangci/golangci-lint:v1.55
+          command: [sh, -c]
+          args: [ "cd /w/{{ .Values.build.repository.appPath }} && golangci-lint run" ]
+          volumeMounts: [{ name: workspace, mountPath: /w }]

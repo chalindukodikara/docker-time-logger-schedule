@@ -1,0 +1,166 @@
+---
+# Source: my-build-chart/templates/build.yaml
+apiVersion: core.choreo.dev/v1
+kind: Build
+metadata:
+  name: go-build
+spec:
+  classRef: default-buildpack-class
+  repository:
+    url:      https://github.com/wso2/choreo-samples
+    revision: "4061be9"
+    appPath:  go-reading-list-rest-api
+  parameters: 
+    app_version: v1.0.0
+    builder_image: gcr.io/buildpacks/builder:heroku-22
+    env:
+      APP_ENV: production
+---
+# Source: my-build-chart/templates/buildClass.yaml
+apiVersion: core.choreo.dev/v1
+kind: BuildClass
+metadata:
+  name: default-buildpack-class
+spec:
+  engine:      argo
+  templateRef: buildpack-services-template
+  parameters:
+    builder_image: gcr.io/buildpacks/builder:google-22
+    go_version: "1.21"
+---
+# Source: my-build-chart/templates/buildTemplate.yaml
+apiVersion: core.choreo.dev/v1
+kind: BuildTemplate
+metadata:
+  name: buildpack-services-template
+  labels: { language: go, template-type: microservice }
+spec:
+  executionMode: "single"
+  timeout:       "30m"
+
+  parameters:
+    - name: app_version
+      value: "v1.0.0"
+    - name: builder_image
+      value: "gcr.io/buildpacks/builder:heroku-22"
+    - name: coverage_threshold
+      value: "80"
+    - name: docker_host
+      value: "inherit"
+    - name: env
+      value: "map[APP_ENV:production]"
+    - name: go_version
+      value: "1.21"
+    - name: platform
+      value: "linux/amd64"
+    - name: run_image
+      value: "gcr.io/buildpacks/google-22/run:latest"
+
+  workspace:
+    volumeClaimTemplate:
+      accessModes: ["ReadWriteOnce"]
+      resources: { requests: { storage: 2Gi } }
+
+  volumes:
+    - { name: podman-cache, type: hostPath, path: /shared/podman/cache }
+
+  steps:
+  - - name: clone
+      image: alpine/git
+      retries: 3
+      script: |
+        set -e
+        git clone --depth 1 https://github.com/wso2/choreo-samples /workspace/src
+        cd /workspace/src
+        git rev-parse --short HEAD > /workspace/git_sha.txt
+      outputs: [{ name: git_sha, path: /workspace/git_sha.txt }]
+
+  - - name: build
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      securityContext: { privileged: true }
+      env:
+        - { name: BP_GO_VERSION, value: "1.21" }
+        - { name: APP_ENV,       value: "production" }
+      script: |
+        set -e
+        cd /workspace/src/go-reading-list-rest-api
+        pack build myimg:v1.0.0 \
+          --builder gcr.io/buildpacks/builder:heroku-22 \
+          --run-image gcr.io/buildpacks/google-22/run:latest \
+          --docker-host inherit \
+          --path . \
+          --env BP_GO_VERSION=1.21
+      inputs: [ git_sha ]
+      volumeMounts:
+        - { name: podman-cache, mountPath: /var/lib/containers/cache }
+
+  # Fix: Proper parallel step syntax
+  - - name: unit-tests
+      image: golang:1.21
+      script: go test ./...
+    - name: lint
+      image: golangci/golangci-lint:v1.55
+      script: golangci-lint run
+---
+# Source: my-build-chart/templates/workflow.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: wf-go-build
+  labels: { buildClass: default-buildpack-class }
+spec:
+  entrypoint: build
+  templates:
+  - name: build
+    containerSet:
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: podman-cache
+          hostPath:
+            path: /shared/podman/cache
+            type: DirectoryOrCreate
+      containers:
+
+        - name: clone
+          image: alpine/git
+          command: [sh, -c]
+          args:
+            - >-
+              git clone --depth 1 https://github.com/wso2/choreo-samples /w &&
+              cd /w/go-reading-list-rest-api &&
+              git rev-parse --short HEAD > /w/git_sha.txt
+          volumeMounts: [{ name: workspace, mountPath: /w }]
+
+        - name: build
+          dependencies: ["clone"]
+          image: ghcr.io/openchoreo/podman-runner:v1.0
+          env:
+            - { name: BP_GO_VERSION, value: "1.21" }
+            - { name: APP_ENV,       value: "production" }
+          command: [sh, -c]
+          args:
+            - >-
+              cd /w/go-reading-list-rest-api &&
+              pack build myimg:v1.0.0
+              --builder gcr.io/buildpacks/builder:heroku-22
+              --run-image gcr.io/buildpacks/google-22/run:latest
+              --docker-host inherit
+              --path . --env BP_GO_VERSION=1.21
+          volumeMounts:
+            - { name: workspace,   mountPath: /w }
+            - { name: podman-cache, mountPath: /var/lib/containers/cache }
+
+        - name: unit-tests
+          dependencies: ["build"]
+          image: golang:1.21
+          command: [sh, -c]
+          args: [ "cd /w/go-reading-list-rest-api && go test ./..." ]
+          volumeMounts: [{ name: workspace, mountPath: /w }]
+
+        - name: lint
+          dependencies: ["build"]
+          image: golangci/golangci-lint:v1.55
+          command: [sh, -c]
+          args: [ "cd /w/go-reading-list-rest-api && golangci-lint run" ]
+          volumeMounts: [{ name: workspace, mountPath: /w }]

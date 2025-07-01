@@ -1,0 +1,11 @@
+apiVersion: core.choreo.dev/v1
+kind: Build
+metadata:
+  name: {{ .Values.build.name }}
+spec:
+  classRef: {{ .Values.class.name }}
+  repository:
+    url:      {{ .Values.build.repository.url }}
+    revision: {{ .Values.build.repository.revision | quote }}
+    appPath:  {{ .Values.build.repository.appPath }}
+  parameters: {{ toYaml .Values.build.parameters | nindent 4 }}

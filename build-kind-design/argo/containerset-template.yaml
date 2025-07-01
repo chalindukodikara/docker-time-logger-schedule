@@ -1,0 +1,101 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: build-container-set-template
+  namespace: choreo-ci-default-org
+spec:
+  # Everything the Workflow will need is baked into the template
+  entrypoint: build
+  serviceAccountName: workflow-sa
+
+  # Shared PVC for source and build artifacts
+  volumeClaimTemplates:
+  - metadata:
+      name: workspace
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 2Gi
+
+  # Host-path cache that speeds up Podman / Buildah layers
+  volumes:
+  - name: podman-cache
+    hostPath:
+      path: /shared/podman/cache
+      type: DirectoryOrCreate
+
+  templates:
+  - name: build
+    containerSet:
+      # Same two volumes mounted into *every* container
+      volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+      - name: podman-cache
+        mountPath: /shared/podman/cache
+
+      containers:
+
+      # 1️⃣  Clone repo
+      - name: clone
+        image: alpine/git
+        command: ["sh", "-c"]
+        args:
+        - |
+            set -e
+            git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /workspace/source
+            cd /workspace/source
+            COMMIT_SHA=$(git rev-parse HEAD)
+            echo "Clone done"
+            echo -n "$COMMIT_SHA" | cut -c1-8 > /workspace/git-revision.txt
+
+      # 2️⃣  Build once clone is complete
+      - name: build
+        dependencies: ["clone"]            # container-level ordering
+        image: ghcr.io/openchoreo/podman-runner:v1.0
+        command: ["sh", "-c"]
+        args:
+        - |-
+          set -e
+
+          mkdir -p /etc/containers
+          cat <<EOF > /etc/containers/storage.conf
+          [storage]
+          driver = "overlay"
+          runroot = "/run/containers/storage"
+          graphroot = "/var/lib/containers/storage"
+          [storage.options.overlay]
+          mount_program = "/usr/bin/fuse-overlayfs"
+          EOF
+          podman system service --time=0 &
+          until podman info --format '{{.Host.RemoteSocket.Exists}}' 2>/dev/null | grep -q "true"; do
+            sleep 1
+          done
+          REVISION=$(cat /workspace/git-revision.txt)
+          if [[ ! -f "/shared/podman/cache/google-builder.tar" ]]; then
+            podman pull gcr.io/buildpacks/builder:google-22
+            podman save -o /shared/podman/cache/google-builder.tar gcr.io/buildpacks/builder:google-22
+          else
+            if ! podman load -i /shared/podman/cache/google-builder.tar; then
+              podman pull gcr.io/buildpacks/builder:google-22
+              podman save -o /shared/podman/cache/google-builder.tar gcr.io/buildpacks/builder:google-22
+            fi
+          fi
+
+
+          if [[ ! -f "/shared/podman/cache/google-run.tar" ]]; then
+            podman pull gcr.io/buildpacks/google-22/run:latest
+            podman save -o /shared/podman/cache/google-run.tar gcr.io/buildpacks/google-22/run:latest
+          else
+            if ! podman load -i /shared/podman/cache/google-run.tar; then
+              podman pull gcr.io/buildpacks/google-22/run:latest
+              podman save -o /shared/podman/cache/google-run.tar gcr.io/buildpacks/google-22/run:latest
+            fi
+          fi
+
+          /usr/local/bin/pack build default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$REVISION --builder=gcr.io/buildpacks/builder:google-22 \
+          --docker-host=inherit --path=/workspace/source/go-reading-list-rest-api --pull-policy if-not-present --env GOOGLE_GO_VERSION="1.x"
+
+          podman save -o /workspace/app-image.tar default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$REVISION
+          

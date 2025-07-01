@@ -1,0 +1,67 @@
+apiVersion: core.choreo.dev/v1
+kind: ComponentV2
+metadata:
+  name: reading-list-service
+#  namespace: default-org
+spec:
+  owner:
+    projectName: default-project
+
+  # Defines how to create the artifact
+  build: 
+    templateRef:
+      name: default-go
+      # Override in normal flow
+      buildPack:
+        name: go
+        # Whether version should be defined here or overridden in the Build resource is explained below.
+        version: 1.22
+
+    repository:
+      url: https://github.com/wso2/choreo-samples
+      revision:
+        # branch: main
+        commit: 4061be9
+      appPath: /go-reading-list-rest-api
+
+    params:
+      # Optional overrides for Docker builds (default: appPath)
+      context: /go-reading-list-rest-api
+      dockerfilePath: /go-reading-list-rest-api/Dockerfile
+
+      # Docker build args (`--build-arg`)
+      buildArgs:
+        NODE_VERSION: 18
+
+      # Pack CLI environment variables (`--env`)
+      env:
+        BP_GO_VERSION: 1.21
+
+      # Common options used for both Docker and Buildpacks
+      docker-host: inherit
+      platform: linux/arm64
+
+  # Defines how the component is configured during deployment
+  workload:
+    className: go-service-standard
+    # Defines how to deploy the component
+    type: Service
+    image: ghcr.io/openchoreo/samples/greeter-service:latest
+    command: [ "./go-greeter" ]
+    args: [ "--port", "9090" ]
+    env:
+      - key: LOG_LEVEL
+        value: "info"
+      - key: GITHUB_REPOSITORY
+        valueFrom:
+          configurationGroupRef:
+            name: github
+            key: repository
+      - key: GITHUB_TOKEN
+        valueFrom:
+          configurationGroupRef:
+            name: github
+            key: pat
+    envFrom: [ ]
+    fileMounts: [ ]
+    fileMountsFrom: [ ]

@@ -1,0 +1,30 @@
+template:
+  name: buildpack-services-template
+  executionMode: single
+  timeout: "30m"
+  parameters:
+    builder_image: "gcr.io/buildpacks/builder:google-22"
+    run_image:     "gcr.io/buildpacks/google-22/run:latest"
+    go_version:    "1.22"
+    docker_host:   "inherit"
+    platform:      "linux/amd64"
+    app_version:   "latest"
+    coverage_threshold: "80"
+
+class:
+  name: default-buildpack-class
+  engine: argo
+  parameters:
+    builder_image: "gcr.io/buildpacks/builder:google-22"
+    go_version:    "1.21"
+
+build:
+  name: go-build
+  repository:
+    url: "https://github.com/wso2/choreo-samples"
+    revision: "4061be9"
+    appPath: "go-reading-list-rest-api"
+  parameters:
+    app_version: "v1.0.0"
+    env:
+      APP_ENV: production

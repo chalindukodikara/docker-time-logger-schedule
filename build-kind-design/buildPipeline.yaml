@@ -1,0 +1,46 @@
+
+apiVersion: core.choreo.dev/v1
+kind: BuildPipeline
+metadata:
+  name: default-build-pipeline
+  namespace: default-org
+  labels:
+    language: go
+    type: default
+    maintainer: platform-team
+spec:
+  workflowTemplate:
+    volumeClaimTemplates:
+    - metadata:
+        creationTimestamp: null
+        name: workspace
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi
+    volumes:
+    - hostPath:
+        path: /shared/podman/cache
+        type: DirectoryOrCreate
+      name: podman-cache
+    templates:
+      - name: build-workflow
+        steps:
+          - - name: clone-step
+              templateRef:
+                name: default-workflow-template
+                template: clone-step
+          - - name: build-step
+              templateRef:
+                name: default-workflow-template
+                template: build-step
+              arguments:
+                parameters:
+                  - name: git-revision
+                    value: "{{steps.clone-step.outputs.parameters.git-revision}}"
+                  - name: builder-image
+                    value: "{{workflow.parameters.builder-image}}"
+                  - name: run-image
+                    value: "{{workflow.parameters.run-image}}"
