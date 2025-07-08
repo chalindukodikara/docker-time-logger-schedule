@@ -4,38 +4,35 @@ metadata:
   name: reading-list-service
 #  namespace: default-org
 spec:
+  type: Service
   owner:
     projectName: default-project
 
   # Defines how to create the artifact
   build: 
-    templateRef:
-      name: default-go
-      # Override in normal flow
-      buildPack:
-        name: go
-        # Whether version should be defined here or overridden in the Build resource is explained below.
-        version: 1.22
-
+    # Optional
     repository:
       url: https://github.com/wso2/choreo-samples
       revision:
-        # branch: main
-        commit: 4061be9
+        branch: main
+        # commit: 4061be9 # No need for component?
       appPath: /go-reading-list-rest-api
 
-    params:
-      # Optional overrides for Docker builds (default: appPath)
+    # Optional
+    parameters:
       context: /go-reading-list-rest-api
       dockerfilePath: /go-reading-list-rest-api/Dockerfile
-
+      language: go
+      version: 1.21
       # Docker build args (`--build-arg`)
       buildArgs:
         NODE_VERSION: 18
+        APP_VERSION: v1.0.0
 
       # Pack CLI environment variables (`--env`)
       env:
         BP_GO_VERSION: 1.21
+        APP_ENV: production
 
       # Common options used for both Docker and Buildpacks
       docker-host: inherit

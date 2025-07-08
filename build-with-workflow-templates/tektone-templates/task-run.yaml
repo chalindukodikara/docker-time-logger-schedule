@@ -1,0 +1,23 @@
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: clone-step-run-02
+  namespace: choreo-ci-default-org
+spec:
+  params:
+    - name: git-repo   # https://github.com/wso2/choreo-samples
+      value: https://github.com/wso2/choreo-samples
+    - name: branch     # main / feature-x
+      value: main
+  taskRef:
+    name: clone-step
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        metadata:
+          name: buildpack-shared-pvc
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi

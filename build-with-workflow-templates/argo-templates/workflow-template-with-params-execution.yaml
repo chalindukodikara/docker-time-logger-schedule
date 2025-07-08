@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: buildpack-build-workflow
+  namespace: choreo-ci-default-org
+spec:
+  arguments:
+    parameters:
+      - name: git-repo
+        value: https://github.com/wso2/choreo-samples
+      - name: branch
+        value: main
+      - name: language
+        value: GOOGLE_GO_VERSION
+      - name: language-version
+        value: 1.x
+      - name: builder-image
+        value: gcr.io/buildpacks/builder:google-22
+      - name: run-image
+        value: gcr.io/buildpacks/google-22/run:latest
+  workflowTemplateRef:
+    name: buildpack-build-template

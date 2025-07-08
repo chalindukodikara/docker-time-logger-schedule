@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────
+# Build Task  (was: build-step template)
+# ─────────────────────────────────────────────
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-step
+  namespace: choreo-ci-default-org
+spec:
+  params:
+    - name: git-revision
+    - name: builder-image          # gcr.io/buildpacks/builder:google-22
+    - name: run-image              # gcr.io/buildpacks/google-22/run:latest
+    - name: language               # GOOGLE_GO_VERSION
+    - name: language-version       # 1.x
+  workspaces:
+    - name: source
+    - name: podman-cache
+  steps:
+    - name: build
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      securityContext:
+        privileged: true
+      env:
+        - name: CGO_ENABLED
+          value: "0"
+        - name: CHALINDU
+          value: "98 kodi"
+      command: [sh, -c]
+      args:
+        - |
+          set -e
+
+          # ───── podman bootstrap ─────
+          mkdir -p /etc/containers
+          cat <<EOF >/etc/containers/storage.conf
+          [storage]
+          driver="overlay"
+          runroot="/run/containers/storage"
+          graphroot="/var/lib/containers/storage"
+          [storage.options.overlay]
+          mount_program="/usr/bin/fuse-overlayfs"
+          EOF
+          podman system service --time=0 &
+          until podman info --format '{{ .Host.RemoteSocket.Exists }}' | grep -q true; do sleep 1; done
+          echo "Podman service is running"
+          echo "$(params.builder-image) and $(params.run-image) cached successfully"
+          echo "$(params.language) version: $(params.language-version)"
+          # ───── cache builder image ─────
+          if [ ! -f "$(workspaces.podman-cache.path)/google-builder.tar" ]; then
+            podman pull $(params.builder-image)
+            podman save -o $(workspaces.podman-cache.path)/google-builder.tar $(params.builder-image)
+          else
+            if ! podman load -i $(workspaces.podman-cache.path)/google-builder.tar; then
+              podman pull $(params.builder-image)
+              podman save -o $(workspaces.podman-cache.path)/google-builder.tar $(params.builder-image)
+            fi
+          fi
+
+          # ───── cache run image ─────
+          if [ ! -f "$(workspaces.podman-cache.path)/google-run.tar" ]; then
+            podman pull $(params.run-image)
+            podman save -o $(workspaces.podman-cache.path)/google-run.tar $(params.run-image)
+          else
+            if ! podman load -i $(workspaces.podman-cache.path)/google-run.tar; then
+              podman pull $(params.run-image)
+              podman save -o $(workspaces.podman-cache.path)/google-run.tar $(params.run-image)
+            fi
+          fi
+          sleep 3000
+          echo "Building image with pack ..."
+          pack config default-builder $(params.builder-image)
+          /usr/local/bin/pack build default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$(params.git-revision) \
+            --builder=$(params.builder-image) \
+            --docker-host=inherit \
+            --path=$(workspaces.source.path)/go-reading-list-rest-api \
+            --pull-policy if-not-present \
+            --env $(params.language)=$(params.language-version)
+
+          podman save -o $(workspaces.source.path)/app-image.tar \
+            default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-$(params.git-revision)

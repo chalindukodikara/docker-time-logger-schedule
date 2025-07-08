@@ -1,0 +1,29 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: clone-step
+  namespace: choreo-ci-default-org
+spec:
+  params:
+    - name: git-repo   # https://github.com/wso2/choreo-samples
+    - name: branch     # main / feature-x
+  results:
+    - name: git-revision               # short SHA
+      description: 8-char commit hash
+  workspaces:
+    - name: source
+  steps:
+    - name: clone-step
+      image: alpine/git
+      command: [sh, -c]
+      args:
+        - |
+          set -e
+          echo "Cloning repository..."
+          echo "Branch: $(params.branch)"
+          echo "Repository URL: $(params.git-repo)"
+          git clone --single-branch --branch $(params.branch) \
+                    --depth 1 $(params.git-repo) $(workspaces.source.path)
+          cd $(workspaces.source.path)
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo -n "${COMMIT_SHA}" | cut -c1-8 > $(results.git-revision.path)

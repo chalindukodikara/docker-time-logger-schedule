@@ -1,0 +1,39 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: trigger-template
+  namespace: choreo-ci-default-org
+spec:
+  params:
+  - name: git-repo
+    description: The git revision
+    default: https://github.com/wso2/choreo-samples
+  - name: branch
+    description: The git repository url
+    default: main
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1beta1
+    kind: PipelineRun
+    metadata:
+      name: buildpack-build-run
+      namespace: choreo-ci-default-org
+    spec:
+      pipelineRef:
+        name: buildpack-build-pipeline
+      params:
+        - name: git-repo
+          value: https://github.com/wso2/choreo-samples
+        - name: branch
+          value: main
+      workspaces:
+        - name: shared-workspace
+          volumeClaimTemplate:
+            metadata:
+              name: buildpack-shared-pvc
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 2Gi
+        - name: podman-cache
+          emptyDir: {}

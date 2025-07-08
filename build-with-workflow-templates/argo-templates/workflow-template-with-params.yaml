@@ -1,9 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
-kind: Workflow
+kind: WorkflowTemplate
 metadata:
-  labels:
-    managed-by: choreo-build-controller
-  name: test-cluster-01
+  name: buildpack-build-template
   namespace: choreo-ci-default-org
 spec:
   affinity:
@@ -15,9 +13,13 @@ spec:
             operator: In
             values:
             - workflow-runner
-  arguments: {}
   entrypoint: build-workflow
   serviceAccountName: workflow-sa
+  # Default parameters for the workflow
+  arguments:
+    parameters:
+      - name: branch
+        value: development
   templates:
   - inputs: {}
     metadata: {}
@@ -39,22 +41,14 @@ spec:
             value: '{{steps.clone-step.outputs.parameters.git-revision}}'
         name: push-step
         template: push-step
-  # - name: run-python
-  #   container:
-  #     image: python:3.10
-  #     args:
-  #       - python
-  #       - -c
-  #       - |
-  #         import time
-  #         print("Starting Python Script")
-  #         time.sleep(3)
-  #         print("Done!")
   - container:
       args:
       - |-
         set -e
-        git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /mnt/vol/source
+        echo "Cloning repository..."
+        echo "Branch: {{workflow.parameters.branch}}"
+        echo "Repository URL: {{workflow.parameters.git-repo}}"
+        git clone --single-branch --branch main --depth 1 {{workflow.parameters.git-repo}} /mnt/vol/source
         cd /mnt/vol/source
         COMMIT_SHA=$(git rev-parse HEAD)
         echo -n "$COMMIT_SHA" | cut -c1-8 > /tmp/git-revision.txt
@@ -98,28 +92,28 @@ spec:
         done
 
         if [[ ! -f "/shared/podman/cache/google-builder.tar" ]]; then
-          podman pull gcr.io/buildpacks/builder:google-22
-          podman save -o /shared/podman/cache/google-builder.tar gcr.io/buildpacks/builder:google-22
+          podman pull {{workflow.parameters.builder-image}}
+          podman save -o /shared/podman/cache/google-builder.tar {{workflow.parameters.builder-image}}
         else
           if ! podman load -i /shared/podman/cache/google-builder.tar; then
-            podman pull gcr.io/buildpacks/builder:google-22
-            podman save -o /shared/podman/cache/google-builder.tar gcr.io/buildpacks/builder:google-22
+            podman pull {{workflow.parameters.builder-image}}
+            podman save -o /shared/podman/cache/google-builder.tar {{workflow.parameters.builder-image}}
           fi
         fi
 
 
         if [[ ! -f "/shared/podman/cache/google-run.tar" ]]; then
-          podman pull gcr.io/buildpacks/google-22/run:latest
-          podman save -o /shared/podman/cache/google-run.tar gcr.io/buildpacks/google-22/run:latest
+          podman pull {{workflow.parameters.run-image}}
+          podman save -o /shared/podman/cache/google-run.tar {{workflow.parameters.run-image}}
         else
           if ! podman load -i /shared/podman/cache/google-run.tar; then
-            podman pull gcr.io/buildpacks/google-22/run:latest
-            podman save -o /shared/podman/cache/google-run.tar gcr.io/buildpacks/google-22/run:latest
+            podman pull {{workflow.parameters.run-image}}
+            podman save -o /shared/podman/cache/google-run.tar {{workflow.parameters.run-image}}
           fi
         fi
-
-        /usr/local/bin/pack build default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-{{inputs.parameters.git-revision}} --builder=gcr.io/buildpacks/builder:google-22 \
-        --docker-host=inherit --path=/mnt/vol/source/go-reading-list-rest-api --pull-policy if-not-present --env GOOGLE_GO_VERSION="1.x"
+        echo "Building image with pack..."
+        /usr/local/bin/pack build default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-{{inputs.parameters.git-revision}} --builder={{workflow.parameters.builder-image}} \
+        --docker-host=inherit --path=/mnt/vol/source/go-reading-list-rest-api --pull-policy if-not-present --env {{workflow.parameters.language}}={{workflow.parameters.language-version}}
 
         podman save -o /mnt/vol/app-image.tar default-org-default-project-reading-list-service-08512f5d:reading-list-service-main-33d882c8-{{inputs.parameters.git-revision}}
       command:

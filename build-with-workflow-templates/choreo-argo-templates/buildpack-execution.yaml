@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: buildpack-build-workflow-08
+  namespace: choreo-ci-default-org
+spec:
+  serviceAccountName: workflow-sa
+  arguments:
+    parameters:
+      - name: git-repo
+        value: https://github.com/wso2/choreo-samples
+      - name: branch
+        value: main
+      - name: app-path
+        value: /go-reading-list-rest-api
+      - name: language
+        value: go
+      - name: language-version
+        value: 1.x
+      - name: image-name
+        value: test-01
+      - name: image-tag
+        value: test-01
+  workflowTemplateRef:
+    name: default-argo-buildpack-build-template
+    clusterScope: true

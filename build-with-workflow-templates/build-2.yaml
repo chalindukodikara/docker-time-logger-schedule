@@ -1,0 +1,25 @@
+apiVersion: core.choreo.dev/v1
+kind: BuildV2
+metadata:
+  name: go-build-01
+  namespace: default-org
+spec:
+  owner:
+    organizationName: default-org
+    projectName: default-project
+    componentName: go-reading-list-rest-api
+
+  repository:
+    url: https://github.com/wso2/choreo-samples
+    revision:
+      branch: main
+      # commit: 4061be9
+    appPath: /go-reading-list-rest-api
+
+  templateRef:
+    name: default-argo-buildpack-build-template
+    parameters:
+      - name: language
+        value: go
+      - name: language-version
+        value: 1.x

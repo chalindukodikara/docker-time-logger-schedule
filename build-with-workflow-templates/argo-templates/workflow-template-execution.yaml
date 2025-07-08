@@ -1,8 +1,8 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: test-template-usage-001
+  name: go-workflow-template-workflow-01
   namespace: choreo-ci-default-org
 spec:
   workflowTemplateRef:
-    name: build-container-set-template
+    name: go-workflow-template

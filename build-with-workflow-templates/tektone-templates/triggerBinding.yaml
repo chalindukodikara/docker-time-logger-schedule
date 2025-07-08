@@ -1,0 +1,12 @@
+
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: trigger-binding
+  namespace: choreo-ci-default-org
+spec:
+  params:
+    - name: git-repo
+      value: https://github.com/wso2/choreo-samples
+    - name: branch
+      value: master

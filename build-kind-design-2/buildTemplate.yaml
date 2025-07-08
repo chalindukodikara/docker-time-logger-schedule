@@ -61,14 +61,15 @@ spec:
   steps:
     # --- Sequential Step 1: Clone the repo ---
     - - name: clone-step
-        script: |
-          #!/bin/bash
+        image: alpine/git
+        command: [bash, -c]
+        args: 
+        - |-
           set -e
           git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /mnt/vol/source
           cd /mnt/vol/source
           COMMIT_SHA=$(git rev-parse HEAD)
           echo -n "$COMMIT_SHA" | cut -c1-8 > /tmp/git-revision.txt
-        image: alpine/git
         retries: 3 # maps to Tekton “retries”, Argo limit
         volumeMounts:
           - mountPath: /mnt/vol
@@ -87,12 +88,12 @@ spec:
 
     # --- Sequential Step 2: Build using Podman ---
     - - name: build-step
+        image: ghcr.io/openchoreo/podman-runner:v1.0
         args: |
           #!/bin/bash
           echo "Build Script"
           echo "{{.builder_image}}"
           echo "{{.run_image}}"
-        image: ghcr.io/openchoreo/podman-runner:v1.0
         securityContext:
           privileged: true
         env:
@@ -108,6 +109,7 @@ spec:
             value: "{{.env.BP_GO_VERSION}}"   # Passed dynamically via inputs
         inputs:
           - name: git-revision
+            value: '{{clone-step.outputs.git-revision}}'
         volumeMounts:
           - mountPath: /mnt/vol
             name: workspace
@@ -123,8 +125,9 @@ spec:
 
     # --- Parallel Test & Linting Phase ---
     - - name: Unit Tests
-        script: |
-          #!/bin/bash
+        image: busybox:latest
+        command: [bash, -c]
+        args: |
           echo "Node version: {{.buildArgs.NODE_VERSION}}"
           echo "Running unit tests..."
           sleep 3
@@ -132,7 +135,8 @@ spec:
           echo "unit-test-results" > /tmp/parallel-workspace/unit.txt
 
       - name: Integration Tests
-        script: |
+        image: busybox:latest
+        args: |
           #!/bin/bash
           echo "Running integration tests..."
           sleep 4
@@ -140,29 +144,10 @@ spec:
           echo "integration-test-results" > /tmp/parallel-workspace/integration.txt
 
       - name: Linting
-        script: |
+        image: busybox:latest
+        args: |
           #!/bin/bash
           echo "Running code linting..."
           sleep 2
           echo "Linting completed"
           echo "linting-results" > /tmp/parallel-workspace/lint.txt
-    - - name: flip-coin
-        image: python:alpine3.6
-        script:
-          command: [python]
-          source: |
-            import random
-            result = "heads" if random.randint(0,1) == 0 else "tails"
-            print(result)
-
-    - - name: heads
-        container:
-          image: alpine:3.6
-          command: [sh, -c]
-          args: ["echo \"it was heads\""]
-
-    - - name: tails
-        container:
-          image: alpine:3.6
-          command: [sh, -c]
-          args: ["echo \"it was tails\""]

@@ -1,0 +1,69 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: buildpack-build-pipeline
+  namespace: choreo-ci-default-org
+spec:
+  params:
+    - name: git-repo
+      type: string
+      description: "Git repository URL to clone"
+    - name: branch
+      type: string
+      description: "Branch of the git repository to clone"
+      default: "main"
+    - name: language
+      type: string
+      description: "Programming language to use for the build"
+      default: "GOOGLE_GO_VERSION"
+    - name: language-version
+      type: string
+      default: "1.x"
+    - name: builder-image
+      type: string
+      description: "Builder image to use for the build"
+      default: "gcr.io/buildpacks/builder:google-22"
+    - name: run-image
+      type: string
+      description: "Run image to use for the build"
+      default: "gcr.io/buildpacks/google-22/run:latest"
+
+  workspaces:
+    - name: shared-workspace
+    - name: podman-cache
+
+  tasks:
+    # ───────────────────────── clone ─────────────────────────
+    - name: clone-step
+      taskRef:
+        name: clone-step
+      params:
+        - name: git-repo
+          value: $(params.git-repo)   
+        - name: branch
+          value: $(params.branch)      
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # ───────────────────────── build ─────────────────────────
+    - name: build-step
+      runAfter: ["clone-step"]
+      taskRef:
+        name: build-step
+      params:
+        - name: git-revision
+          value: $(tasks.clone-step.results.git-revision)
+        - name: builder-image
+          value: $(params.builder-image) 
+        - name: run-image
+          value: $(params.run-image)    
+        - name: language
+          value: $(params.language)      
+        - name: language-version
+          value: $(params.language-version) 
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: podman-cache
+          workspace: podman-cache

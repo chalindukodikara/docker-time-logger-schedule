@@ -95,17 +95,17 @@ spec:
         image: ghcr.io/openchoreo/podman-runner:v1.0
         securityContext:
           privileged: true
-        env:
-          - name: CGO_ENABLED
-            value: "0"
-          - name: GOPROXY
-            value: "https://proxy.golang.org,direct"
-          - name: GOSUMDB
-            value: "sum.golang.org"
-          - name: APP_VERSION
-            value: "{{parameters.env.APP_VERSION}}"
-          - name: BP_GO_VERSION
-            value: "{{parameters.env.BP_GO_VERSION}}"   # Passed dynamically via inputs
+        inputs:
+          - name: git-revision
+        volumeMounts:
+          - mountPath: /mnt/vol
+            name: workspace
+          - mountPath: /shared/podman/cache
+            name: podman-cache
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
         inputs:
           - name: git-revision
         volumeMounts:

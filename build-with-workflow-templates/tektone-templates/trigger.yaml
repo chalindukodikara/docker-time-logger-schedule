@@ -1,0 +1,10 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: Trigger
+metadata:
+  name: trigger
+  namespace: choreo-ci-default-org
+spec:
+  bindings:
+  - ref: trigger-binding
+  template:
+    ref: trigger-template

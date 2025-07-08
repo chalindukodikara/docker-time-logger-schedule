@@ -1,0 +1,272 @@
+--- Raw content of build.yaml ---
+apiVersion: core.choreo.dev/v1
+kind: Build
+metadata:
+  name: go-build
+  namespace: default-org
+spec:
+  classRef: default-buildpack-class
+
+  # Optional
+  repository:
+    url: https://github.com/wso2/choreo-samples
+    revision:
+      # branch: main
+      commit: 4061be9
+    appPath: /go-reading-list-rest-api
+
+  # Optional
+  parameters:
+    context: /go-reading-list-rest-api
+    dockerfilePath: /go-reading-list-rest-api/Dockerfile
+    language: go
+    version: 1.21
+    # Docker build args (`--build-arg`)
+    buildArgs:
+      NODE_VERSION: 18
+      APP_VERSION: v1.0.0
+
+    # Pack CLI environment variables (`--env`)
+    env:
+      BP_GO_VERSION: 1.21
+      APP_ENV: production
+
+    # Common options used for both Docker and Buildpacks
+    docker-host: inherit
+    platform: linux/arm64
+
+--- End of raw content ---
+--- Raw content of buildClass.yaml ---
+apiVersion: core.choreo.dev/v1
+kind: BuildClass
+metadata:
+  name: default-buildpack-class
+  namespace: default-org
+spec:
+  # Optional: Specifies which execution engine to use for builds (e.g., Argo, Tekton, or future)
+  engine: argo
+
+  parameters:
+    coverage_threshold: "80"
+    builder_image: "gcr.io/buildpacks/builder:google-22"
+    run_image: "gcr.io/buildpacks/google-22/run:latest"
+    version: "1.22"
+    docker-host: inherit
+    platform: linux/amd64
+    env:
+      BP_GO_VERSION: "1.22"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+
+  # PE-controlled override policies
+  overridePolicy:
+    allowParamOverride: true
+    requiredParams:
+      - version
+    restrictedParams:
+      - docker-host
+      - platform
+      - env.BP_GO_VERSION
+  
+  templateRef: buildpack-services-template
+
+--- End of raw content ---
+apiVersion: core.choreo.dev/v1
+kind: BuildTemplate
+metadata:
+  name: buildpack-services-template
+  namespace: default-org
+  labels:
+    template-type: microservice
+    language: go
+    version: "v1.0"
+spec:
+  executionMode: "single"
+  timeout: "30m"
+  defaults:
+    coverage_threshold: "80"
+    builder_image: "gcr.io/buildpacks/builder:google-22"
+    run_image: "gcr.io/buildpacks/google-22/run:latest"
+    docker-host: "inherit"
+    platform: "linux/amd64"
+    env:
+      BP_GO_VERSION: "1.21"
+      APP_ENV: "development"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+    context: "/"
+    dockerfilePath: "./Dockerfile"
+    language: "go"
+    version: "1.21"
+    buildArgs:
+      NODE_VERSION: "16"
+      APP_VERSION: "v0.0.1"
+  volumes:
+    - name: podman-cache
+      hostPath:
+        path: /shared/podman/cache
+        type: DirectoryOrCreate
+    - name: test-results
+      emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi
+  steps:
+    - name: clone-step
+      image: alpine/git
+      retries: 3
+      script: |
+        #!/bin/bash
+        set -e
+        git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /mnt/vol/source
+        cd /mnt/vol/source
+        COMMIT_SHA=$(git rev-parse HEAD)
+        echo -n "$COMMIT_SHA" | cut -c1-8 > /tmp/git-revision.txt
+      volumeMounts:
+        - mountPath: /mnt/vol
+          name: workspace
+      outputs:
+        - name: git-revision
+          valueFrom:
+            path: /tmp/git-revision.txt
+      resource:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "{{ .limits.memory }}"
+          cpu: "{{ .limits.cpu }}"
+    - name: build-step
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      securityContext:
+        privileged: true
+      args: |
+        #!/bin/bash
+        echo "Build Script"
+        echo "{{ index . "builder_image" }}"
+        echo "{{ index . "run_image" }}"
+      env:
+        - name: CGO_ENABLED
+          value: "0"
+        - name: GOPROXY
+          value: "https://proxy.golang.org,direct"
+        - name: GOSUMDB
+          value: "sum.golang.org"
+        - name: APP_VERSION
+          value: "{{ index .buildArgs "APP_VERSION" }}"
+        - name: BP_GO_VERSION
+          value: "{{ .env.BP_GO_VERSION }}"
+      inputs:
+        - name: git-revision
+      volumeMounts:
+        - mountPath: /mnt/vol
+          name: workspace
+        - mountPath: /shared/podman/cache
+          name: podman-cache
+--- Raw content of buildTemplate.yaml ---
+apiVersion: core.choreo.dev/v1
+kind: BuildTemplate
+metadata:
+  name: buildpack-services-template
+  namespace: default-org
+  labels:
+    template-type: microservice
+    language: go
+    version: "v1.0"
+spec:
+  executionMode: "single"
+  timeout: "30m"
+  defaults:
+    coverage_threshold: "80"
+    builder_image: "gcr.io/buildpacks/builder:google-22"
+    run_image: "gcr.io/buildpacks/google-22/run:latest"
+    docker-host: "inherit"
+    platform: "linux/amd64"
+    env:
+      BP_GO_VERSION: "1.21"
+      APP_ENV: "development"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+    context: "/"
+    dockerfilePath: "./Dockerfile"
+    language: "go"
+    version: "1.21"
+    buildArgs:
+      NODE_VERSION: "16"
+      APP_VERSION: "v0.0.1"
+  volumes:
+    - name: podman-cache
+      hostPath:
+        path: /shared/podman/cache
+        type: DirectoryOrCreate
+    - name: test-results
+      emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi
+  steps:
+    - name: clone-step
+      image: alpine/git
+      retries: 3
+      script: |
+        #!/bin/bash
+        set -e
+        git clone --single-branch --branch main --depth 1 https://github.com/wso2/choreo-samples /mnt/vol/source
+        cd /mnt/vol/source
+        COMMIT_SHA=$(git rev-parse HEAD)
+        echo -n "$COMMIT_SHA" | cut -c1-8 > /tmp/git-revision.txt
+      volumeMounts:
+        - mountPath: /mnt/vol
+          name: workspace
+      outputs:
+        - name: git-revision
+          valueFrom:
+            path: /tmp/git-revision.txt
+      resource:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "{{ .limits.memory }}"
+          cpu: "{{ .limits.cpu }}"
+    - name: build-step
+      image: ghcr.io/openchoreo/podman-runner:v1.0
+      securityContext:
+        privileged: true
+      args: |
+        #!/bin/bash
+        echo "Build Script"
+        echo "{{ index . "builder_image" }}"
+        echo "{{ index . "run_image" }}"
+      env:
+        - name: CGO_ENABLED
+          value: "0"
+        - name: GOPROXY
+          value: "https://proxy.golang.org,direct"
+        - name: GOSUMDB
+          value: "sum.golang.org"
+        - name: APP_VERSION
+          value: "{{ index .buildArgs "APP_VERSION" }}"
+        - name: BP_GO_VERSION
+          value: "{{ .env.BP_GO_VERSION }}"
+      inputs:
+        - name: git-revision
+      volumeMounts:
+        - mountPath: /mnt/vol
+          name: workspace
+        - mountPath: /shared/podman/cache
+          name: podman-cache
+--- End of raw content ---

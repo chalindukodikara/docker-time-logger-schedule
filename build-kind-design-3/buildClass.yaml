@@ -1,0 +1,33 @@
+apiVersion: core.choreo.dev/v1
+kind: BuildClass
+metadata:
+  name: default-buildpack-class
+  namespace: default-org
+spec:
+  # Optional: Specifies which execution engine to use for builds (e.g., Argo, Tekton, or future)
+  engine: argo
+
+  parameters:
+    coverage_threshold: "80"
+    builder_image: "gcr.io/buildpacks/builder:google-22"
+    run_image: "gcr.io/buildpacks/google-22/run:latest"
+    version: "1.22"
+    docker-host: inherit
+    platform: linux/amd64
+    env:
+      BP_GO_VERSION: "1.22"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+
+  # PE-controlled override policies
+  overridePolicy:
+    allowParamOverride: true
+    requiredParams:
+      - version
+    restrictedParams:
+      - docker-host
+      - platform
+      - env.BP_GO_VERSION
+  
+  templateRef: buildpack-services-template

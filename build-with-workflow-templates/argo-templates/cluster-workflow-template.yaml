@@ -1,9 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
-kind: Workflow
+kind: ClusterWorkflowTemplate
 metadata:
-  labels:
-    managed-by: choreo-build-controller
-  name: test-cluster-01
+  name: go-workflow-template-cluster
   namespace: choreo-ci-default-org
 spec:
   affinity:

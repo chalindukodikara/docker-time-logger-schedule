@@ -1,0 +1,29 @@
+apiVersion: core.choreo.dev/v1
+kind: Build
+metadata:
+  name: go-build
+  namespace: default-org
+spec:
+  repository:
+    url: https://github.com/wso2/choreo-samples
+    revision:
+      branch: main
+      # commit: 4061be9
+    appPath: /go-reading-list-rest-api
+
+  templateRef:
+    # engine: argo/tektone #(default: argo)
+    name: go-buildpack-template
+    parameters:
+      - name: context
+        value: /go-reading-list-rest-api
+      - name: dockerfilePath
+        value: /go-reading-list-rest-api/Dockerfile
+      - name: language
+        value: go
+      - name: version
+        value: 1.x
+      - name: builder_image
+        value: gcr.io/buildpacks/builder:google-22
+      - name: run_image
+        value: gcr.io/buildpacks/google-22/run:latest

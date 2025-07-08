@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: buildpack-build-workflow-06
+  namespace: choreo-ci-default-org
+spec:
+  arguments:
+    parameters:
+      - name: git-repo
+        value: https://github.com/wso2/choreo-samples
+      - name: branch
+        value: main
+      - name: docker-context
+        value: /go-reading-list-rest-api
+      - name: dockerfile-path
+        value: /go-reading-list-rest-api/Dockerfile
+      - name: image-name
+        value: test-01
+      - name: image-tag
+        value: test-01
+  workflowTemplateRef:
+    name: default-docker-build-template

@@ -1,0 +1,33 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: buildpack-build-run
+  namespace: choreo-ci-default-org
+spec:
+  pipelineRef:
+    name: buildpack-build-pipeline
+  params:
+    - name: git-repo
+      value: https://github.com/wso2/choreo-samples
+    - name: branch
+      value: main
+    - name: language
+      value: GOOGLE_GO_VERSION
+    - name: language-version
+      value: 1.x
+    - name: builder-image
+      value: gcr.io/buildpacks/builder:google-22
+    - name: run-image
+      value: gcr.io/buildpacks/google-22/run:latest
+  workspaces:
+    - name: shared-workspace
+      volumeClaimTemplate:
+        metadata:
+          name: buildpack-shared-pvc
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+    - name: podman-cache
+      emptyDir: {}
