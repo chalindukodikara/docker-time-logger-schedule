@@ -3,7 +3,7 @@ kind: Workflow
 metadata:
   labels:
     managed-by: choreo-build-controller
-  name: test-00006
+  name: test-00007
   namespace: choreo-ci-default-org
 spec:
   affinity:
